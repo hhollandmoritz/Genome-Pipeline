@@ -50,6 +50,71 @@ process INSTALL_ENV {
     """
 }
 
+// ============================================================================
+// SOFTWARE INSTALLATION
+// ============================================================================
+// for GVClass and SSUextract, which are nested Pixi projects
+
+process INSTALL_GVCLASS_SOFTWARE {
+    label 'install'
+    conda "${projectDir}/envs/pixi_tools.yml"
+    storeDir "${params.software_dir}/.install_state"
+
+    input:
+    val ready
+
+    output:
+    path 'gvclass_setup_complete', emit: ready
+
+    script:
+    """
+    set -euo pipefail
+
+    INSTALL_DIR="${params.software_dir}/gvclass"
+    mkdir -p "${params.software_dir}"
+
+    if [ ! -d "\$INSTALL_DIR/.git" ]; then
+        git clone '${params.gvclass_repo_url}' "\$INSTALL_DIR"
+    fi
+
+    cd "\$INSTALL_DIR"
+    pixi install --frozen
+
+    touch "\$OLDPWD/gvclass_setup_complete"
+    """
+}
+
+process INSTALL_SSUEXTRACT_SOFTWARE {
+    label 'install'
+    conda "${projectDir}/envs/pixi_tools.yml"
+    storeDir "${params.software_dir}/.install_state"
+
+    input:
+    val ready
+
+    output:
+    path 'ssuextract_setup_complete', emit: ready
+
+    script:
+    """
+    set -euo pipefail
+
+    INSTALL_DIR="${params.software_dir}/ssuextract"
+    mkdir -p "${params.software_dir}"
+
+    if [ ! -d "\$INSTALL_DIR/.git" ]; then
+        git clone '${params.ssuextract_repo_url}' "\$INSTALL_DIR"
+    fi
+
+    cd "\$INSTALL_DIR"
+
+    sed -i '/^[[:space:]]*time[[:space:]]*=/d' config/base.config
+
+    pixi install --frozen
+
+    touch "\$OLDPWD/ssuextract_setup_complete"
+    """
+}
 
 // ============================================================================
 // REFERENCE DATABASE INSTALLATION
@@ -191,26 +256,34 @@ process INSTALL_BUSCO_DB {
 
 process INSTALL_GVCLASS_DB {
     label 'install'
-    storeDir "${params.db_dir}/gvclass_install"
-
     conda "${projectDir}/envs/pixi_tools.yml"
+    storeDir "${params.db_dir}/gvclass"
 
     input:
     val ready
 
     output:
-    path 'gvclass', emit: db
+    path 'gvclass_db_complete', emit: db
 
     script:
     """
     set -euo pipefail
 
-    git clone '${params.gvclass_repo_url}' gvclass
+    INSTALL_DIR="${params.software_dir}/gvclass"
+    DB_DIR="${params.db_dir}/gvclass"
 
-    cd gvclass
+    if [ ! -d "\$INSTALL_DIR/.pixi/envs/default" ]; then
+        echo "ERROR: GVClass software is not installed." >&2
+        echo "Run: nextflow run main.nf --install_software true" >&2
+        exit 1
+    fi
 
-    pixi install --frozen
-    pixi run setup-db
+    mkdir -p "\$DB_DIR"
+    cd "\$INSTALL_DIR"
+
+    pixi run setup-db --database "\$DB_DIR"
+
+    touch "\$OLDPWD/gvclass_db_complete"
     """
 }
 
@@ -229,33 +302,36 @@ process INSTALL_GVCLASS_DB {
 
 process INSTALL_SSUEXTRACT_DB {
     label 'install'
-    storeDir "${params.db_dir}"
-
     conda "${projectDir}/envs/pixi_tools.yml"
+    storeDir "${params.db_dir}/ssuextract"
 
     input:
     val ready
 
     output:
-    path 'ssuextract_install', emit: db
+    path 'ssuextract_db_complete', emit: db
 
     script:
     """
     set -euo pipefail
 
-    git clone '${params.ssuextract_repo_url}' ssuextract_install
+    INSTALL_DIR="${params.software_dir}/ssuextract"
+    DB_DIR="${params.db_dir}/ssuextract"
 
-    cd ssuextract_install
+    if [ ! -d "\$INSTALL_DIR/.pixi/envs/default" ]; then
+        echo "ERROR: SSUextract software is not installed." >&2
+        echo "Run: nextflow run main.nf --install_software true" >&2
+        exit 1
+    fi
 
-    sed -i '/^[[:space:]]*time[[:space:]]*=/d' \
-        config/base.config
-
-    pixi install --frozen
+    mkdir -p "\$DB_DIR"
+    cd "\$INSTALL_DIR"
 
     pixi run setup \
-        --database_profile \
-        '${params.ssuextract_db_profile ?: 'curated'}' \
-        --database_path "\$(pwd)/resources/database"
+        --database_profile '${params.ssuextract_db_profile ?: 'curated'}' \
+        --database_path "\$DB_DIR"
+
+    touch "\$OLDPWD/ssuextract_db_complete"
     """
 }
 
@@ -338,9 +414,24 @@ workflow INSTALL_ENVS {
 
     INSTALL_ENV(ch_envs)
 
-    emit:
-    ready = INSTALL_ENV.out.ready
-}
+    // install software pixi environments for gvclass and ssuextract
+    // depends on pixi environment being installed
+    ch_pixi_ready = INSTALL_ENV.out.ready
+        .filter { it == 'pixi_tools' }
+        .first()
+
+    INSTALL_GVCLASS_SOFTWARE(ch_pixi_ready)
+    INSTALL_SSUEXTRACT_SOFTWARE(ch_pixi_ready)
+
+        emit:
+        ready = INSTALL_ENV.out.ready
+        software_ready = INSTALL_GVCLASS_SOFTWARE.out.ready
+            .map { 'gvclass' }
+            .mix(
+                INSTALL_SSUEXTRACT_SOFTWARE.out.ready
+                    .map { 'ssuextract' }
+            )
+    }
 
 
 // ============================================================================
@@ -377,6 +468,14 @@ workflow INSTALL_DATABASES {
         .filter { it == 'pixi_tools' }
         .first()
 
+    ch_gvclass = ch_ready
+        .filter { it == 'gvclass' }
+        .first()
+
+    ch_ssuextract = ch_ready
+        .filter { it == 'ssuextract' }
+        .first()
+    
     ch_infernal = ch_ready
         .filter { it == 'infernal' }
         .first()
@@ -389,10 +488,12 @@ workflow INSTALL_DATABASES {
     INSTALL_GTDBTK_DB(ch_gtdbtk)
     INSTALL_BUSCO_DB(ch_busco)
 
-    // These share the same Conda environment but install
-    // their own separate Pixi projects and reference data.
-    INSTALL_GVCLASS_DB(ch_pixi)
-    INSTALL_SSUEXTRACT_DB(ch_pixi)
+    // These depend on the Pixi conda environment AND the 
+    // software installation in the software_dir to run.
+    // Pixi projects don't like to have moving directory structures
+    // so the software folder is the fix.
+    INSTALL_GVCLASS_DB(ch_gvclass)
+    INSTALL_SSUEXTRACT_DB(ch_ssuextract)
 
     INSTALL_RFAM_DB(ch_infernal)
 
@@ -421,7 +522,13 @@ workflow INSTALL_ALL {
 
     // Each completed environment immediately emits its name.
     // Database installers receive their individual ready signals.
-    INSTALL_DATABASES(INSTALL_ENVS.out.ready)
+    // in most cases this is the conda environment installation,
+    // for GVClass and SSUextract it is also the software directory
+    // installation.
+    ch_ready = INSTALL_ENVS.out.ready
+        .mix(INSTALL_ENVS.out.software_ready)
+
+    INSTALL_DATABASES(ch_ready)
 
     emit:
     environments = INSTALL_ENVS.out.ready

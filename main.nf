@@ -257,7 +257,9 @@ workflow {
             'gtdbtk',
             'busco',
             'pixi_tools',
-            'infernal'
+            'infernal',
+            'gvclass',
+            'ssuextract'
         ])
 
         INSTALL_DATABASES(ch_ready)
