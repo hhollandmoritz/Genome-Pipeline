@@ -1,57 +1,75 @@
+
 /*
- * Genome-Pipeline: Installation processes for the databases and containers.
+ * Genome-Pipeline installation workflows (Nextflow DSL2)
  *
- * Exports: INSTALL_CONTAINERS(), INSTALL_DATABASES(ch_images), INSTALL_ALL()
+ * INSTALL_CONTAINERS : pull software images
+ * INSTALL_DATABASES  : install reference datasets using existing images
+ * INSTALL_ALL        : run both, with image-to-database dependencies
  *
- * INSTALL_DATABASES expects tuples (image_name, path_to_sif). For a standalone
- * installation, main.nf should supply existing images from container_dir.
+ * No definition files, fakeroot or privileged builds are used.
  *
- * Requirements on the installation host: Nextflow, Apptainer, internet access,
- * and permission to build images (root, fakeroot, or an appropriate builder).
- * Install processes must run on the HOST (not inside another container).
- *
- * Warning: Database setup for Pixi-based projects requires networking and can
- * install packages in the writable Nextflow work directory. Pin git revisions
- * and the base image for reproducible production installations.
+ * IMPORTANT: Five compound images still need verified published URIs.
+ * Set their null entries in the manifest below before attempting a full install.
+ * Single-package Quay entries use tag lookup as a TEMPORARY convenience;
+ * replace quay-auto with pinned docker://...:tag URIs for reproducibility.
  */
 nextflow.enable.dsl = 2
 
-// All software required across the alternative pipeline branches.
-// A single mapping/MetaBAT image can be reused by multiple analysis processes.
+// ============================================================================
+// CONTAINER INSTALLATION
+// ============================================================================
+// This process pulls an image from a list of images in the install_containers workflow. 
+// It uses singularity to run and pull it.
 process INSTALL_IMAGE {
     tag "$name"
     label 'install'
     storeDir "${params.container_dir}"
 
     input:
-    tuple val(name), val(conda_spec)
+    tuple val(name), val(source)
 
     output:
     tuple val(name), path("${name}.sif"), emit: image
+    tuple val(name), path("${name}.source.txt"), emit: provenance
 
     script:
-    def packages = conda_spec.replace('bioconda::', '').replace('conda-forge::', '')
-    def base_image = params.install_base_image ?: 'continuumio/miniconda3:latest'
-    def build_opts = params.apptainer_build_options ?: ''
+    def safeSource = "'" + source.replace("'", "'\\''") + "'"
     """
-    cat > ${name}.def <<'APPTAINER_DEFINITION'
-Bootstrap: docker
-From: ${base_image}
+    set -euo pipefail
+    source_uri=${safeSource}
 
-%post
-    set -eu
-    conda install -y -c conda-forge -c bioconda ${packages} wget
-    conda clean -a -y
+    # A temporary convenience for published BioContainers repositories.
+    # This looks up a concrete tag when the task runs. Pin the resolved URI
+    # in the manifest for reproducibility after first successful testing.
+    if [[ "\$source_uri" == quay-auto:* ]]; then
+        repository="\${source_uri#quay-auto:}"
+        source_uri=\$(python3 - "\$repository" <<'PY_RESOLVE'
+import json, sys, urllib.parse, urllib.request
+repo = sys.argv[1]
+url = ('https://quay.io/api/v1/repository/biocontainers/'
+       + urllib.parse.quote(repo, safe='')
+       + '/tag/?limit=100&onlyActiveTags=true')
+with urllib.request.urlopen(url, timeout=60) as response:
+    obj = json.load(response)
+tags = [t for t in obj.get('tags', []) if t.get('name') and t['name'] != 'latest']
+if not tags:
+    raise SystemExit('No published BioContainers tags found for ' + repo)
+tags.sort(key=lambda t: t.get('last_modified') or '', reverse=True)
+print('docker://quay.io/biocontainers/' + repo + ':' + tags[0]['name'])
+PY_RESOLVE
+        )
+    fi
 
-%environment
-    export PATH=/opt/conda/bin:\$PATH
-APPTAINER_DEFINITION
-
-    apptainer build ${build_opts} ${name}.sif ${name}.def
+    printf '%s\\n' "\$source_uri" > ${name}.source.txt
+    singularity pull ${name}.sif "\$source_uri"
+    test -s ${name}.sif
     """
 }
 
-// CheckM v1 is used indirectly by dRep when genome-quality filtering is on.
+// ============================================================================
+// REFERENCE DATA INSTALLATION
+// ============================================================================
+// CheckM1 is retained for dRep's optional internal genome-quality filtering.
 process INSTALL_CHECKM1_DB {
     label 'install'
     storeDir "${params.db_dir}/checkm1_db"
@@ -64,12 +82,11 @@ process INSTALL_CHECKM1_DB {
 
     script:
     """
+    set -euo pipefail
     mkdir -p checkm_data
-    apptainer exec "${image}" bash -euc '
-        wget -O checkm_data.tar.gz "${params.checkm1_data_url}"
-        tar -xzf checkm_data.tar.gz -C checkm_data
-        rm checkm_data.tar.gz
-    '
+    wget -O checkm_data.tar.gz '${params.checkm1_data_url}'
+    tar -xzf checkm_data.tar.gz -C checkm_data
+    rm checkm_data.tar.gz
     """
 }
 
@@ -85,8 +102,10 @@ process INSTALL_CHECKM2_DB {
 
     script:
     """
+    set -euo pipefail
     mkdir -p checkm2_db
-    apptainer exec "${image}" checkm2 database --download --path checkm2_db
+    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
+        checkm2 database --download --path "\$(pwd)/checkm2_db"
     """
 }
 
@@ -102,17 +121,14 @@ process INSTALL_GTDBTK_DB {
 
     script:
     """
+    set -euo pipefail
     mkdir -p gtdbtk_data
-    apptainer exec "${image}" bash -euc '
-        wget -O gtdbtk_data.tar.gz "${params.gtdbtk_data_url}"
-        tar -xzf gtdbtk_data.tar.gz -C gtdbtk_data --strip-components=1
-        rm gtdbtk_data.tar.gz
-    '
+    wget -O gtdbtk_data.tar.gz '${params.gtdbtk_data_url}'
+    tar -xzf gtdbtk_data.tar.gz -C gtdbtk_data --strip-components=1
+    rm gtdbtk_data.tar.gz
     """
 }
 
-// BUSCO is installed as a tool in its own image, but its lineage files
-// are also data and must be cached separately for offline HPC use.
 process INSTALL_BUSCO_DB {
     label 'install'
     storeDir "${params.db_dir}/busco_data"
@@ -125,13 +141,16 @@ process INSTALL_BUSCO_DB {
 
     script:
     """
+    set -euo pipefail
     mkdir -p busco_datasets
-    apptainer exec "${image}" busco --download ${params.busco_lineage ?: 'eukaryota_odb10'} --download_path busco_datasets
+    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
+        busco --download '${params.busco_lineage ?: 'eukaryota_odb10'}' \\
+        --download_path "\$(pwd)/busco_datasets"
     """
 }
 
-// The project-specific Pixi environment and DB are installed together,
-// matching the original GVCLASS_SETUP implementation.
+// NOTE: These images must contain BOTH git and pixi. Their Pixi environments
+// are installed to writable work directories, never into a read-only SIF.
 process INSTALL_GVCLASS_DB {
     label 'install'
     storeDir "${params.db_dir}/gvclass_install"
@@ -144,16 +163,13 @@ process INSTALL_GVCLASS_DB {
 
     script:
     """
-    apptainer exec "${image}" bash -euc '
-        git clone "${params.gvclass_repo_url}" gvclass
-        cd gvclass
-        pixi install --frozen
-        pixi run setup-db
-    '
+    set -euo pipefail
+    git clone '${params.gvclass_repo_url}' gvclass
+    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
+        bash -c 'cd gvclass && pixi install --frozen && pixi run setup-db'
     """
 }
 
-// SSUextract is itself a nested Pixi/Nextflow pipeline.
 process INSTALL_SSUEXTRACT_DB {
     label 'install'
     storeDir "${params.db_dir}"
@@ -166,13 +182,11 @@ process INSTALL_SSUEXTRACT_DB {
 
     script:
     """
-    apptainer exec "${image}" bash -euc '
-        git clone "${params.ssuextract_repo_url}" ssuextract_install
-        cd ssuextract_install
-        sed -i "/^[[:space:]]*time[[:space:]]*=/d" config/base.config
-        pixi install --frozen
-        pixi run setup --database_profile "${params.ssuextract_db_profile ?: 'curated'}"
-    '
+    set -euo pipefail
+    git clone '${params.ssuextract_repo_url}' ssuextract_install
+    sed -i '/^[[:space:]]*time[[:space:]]*=/d' ssuextract_install/config/base.config
+    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
+        bash -c 'cd ssuextract_install && pixi install --frozen && pixi run setup --database_profile ${params.ssuextract_db_profile ?: 'curated'}'
     """
 }
 
@@ -185,33 +199,50 @@ process INSTALL_RFAM_DB {
 
     script:
     """
-    wget -O RF01960.cm "${params.rfam_eukarya_cm_url}"
+    set -euo pipefail
+    wget -O RF01960.cm '${params.rfam_eukarya_cm_url}'
+    test -s RF01960.cm
     """
 }
 
+// ============================================================================
+// WORKFLOWS
+// ============================================================================
 workflow INSTALL_CONTAINERS {
     main:
-    ch_specs = Channel.of(
-        tuple('myloasm',     'bioconda::myloasm'),
-        tuple('mapping',     'bioconda::minimap2 bioconda::samtools'),
-        tuple('metabat2',    'bioconda::metabat2'),
-        tuple('semibin2',    'bioconda::semibin'),
-        tuple('remag',       'bioconda::remag'),
-        tuple('drep',        'bioconda::drep conda-forge::python=3.10 conda-forge::setuptools=75.8.2'),
-        tuple('checkm2',     'bioconda::checkm2'),
-        tuple('busco',       'bioconda::busco'),
-        tuple('gtdbtk',      'bioconda::gtdbtk'),
-        tuple('gvclass',     'conda-forge::pixi conda-forge::git'),
-        tuple('genometools', 'bioconda::genometools-genometools'),
-        tuple('ssuextract',  'conda-forge::pixi conda-forge::git'),
-        tuple('cmsearch',    'bioconda::infernal bioconda::samtools bioconda::seqkit'),
-        tuple('report',      'conda-forge::pandas conda-forge::openpyxl')
-    )
+    // Hardcoded image inventory. No params.container_uris map is required.
+    // TODO: Pin concrete tags for quay-auto entries after the first test.
+    // TODO: Replace null for five compound environments with VERIFIED URIs.
+    def sources = [
+        myloasm:     'quay-auto:myloasm',
+        // contains samtools=1.24 and minimap2=2.31-r1302
+        mapping:     'docker://quay.io/biocontainers/mulled-v2-66534bcbb7031a148b13e2ad42583020b9cd25c4:ad4c240457048f1d3cc0bd8c8fa39bf27d222eb7-0', 
+        metabat2:    'quay-auto:metabat2',
+        semibin2:    'quay-auto:semibin',
+        remag:       'quay-auto:remag',
+        drep:        'quay-auto:drep',
+        checkm2:     'quay-auto:checkm2',
+        busco:       'quay-auto:busco',
+        gtdbtk:      'quay-auto:gtdbtk',
+        gvclass:     null, // NEEDS git + pixi in ONE image
+        genometools: 'quay-auto:genometools-genometools',
+        ssuextract:  null, // NEEDS git + pixi in ONE image
+        cmsearch:    null, // NEEDS infernal + samtools + seqkit in ONE image
+        report:      null  // NEEDS pandas + openpyxl in ONE image
+    ]
 
+    def missing = sources.findAll { name, uri -> !uri }.keySet()
+    if (missing) {
+        error("Missing published image URI(s) in modules/install.nf for: ${missing.join(', ')}. " +
+              "These multi-tool environments need verified combined images before a full install.")
+    }
+
+    ch_specs = Channel.fromList(sources.collect { name, uri -> tuple(name, uri) })
     INSTALL_IMAGE(ch_specs)
 
     emit:
-    images = INSTALL_IMAGE.out.image
+    images     = INSTALL_IMAGE.out.image
+    provenance = INSTALL_IMAGE.out.provenance
 }
 
 workflow INSTALL_DATABASES {
@@ -219,7 +250,6 @@ workflow INSTALL_DATABASES {
     ch_images
 
     main:
-    // These inputs ensure the corresponding image exists before DB setup.
     ch_drep       = ch_images.filter { name, image -> name == 'drep'       }.map { name, image -> image }.first()
     ch_checkm2    = ch_images.filter { name, image -> name == 'checkm2'    }.map { name, image -> image }.first()
     ch_gtdbtk     = ch_images.filter { name, image -> name == 'gtdbtk'     }.map { name, image -> image }.first()
