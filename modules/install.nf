@@ -2,80 +2,71 @@
 /*
  * Genome-Pipeline installation workflows (Nextflow DSL2)
  *
- * INSTALL_CONTAINERS : pull software images
- * INSTALL_DATABASES  : install reference datasets using existing images
- * INSTALL_ALL        : run both, with image-to-database dependencies
+ * INSTALL_ENVS      : Initialize environments from envs/*.yml
+ * INSTALL_DATABASES : Install reference databases and Pixi projects
+ * INSTALL_ALL       : Initialize environments, then install databases
  *
- * No definition files, fakeroot or privileged builds are used.
+ * Conda environments are managed by Nextflow and stored in
+ * conda.cacheDir, configured in nextflow.config.
  *
- * IMPORTANT: Five compound images still need verified published URIs.
- * Set their null entries in the manifest below before attempting a full install.
- * Single-package Quay entries use tag lookup as a TEMPORARY convenience;
- * replace quay-auto with pinned docker://...:tag URIs for reproducibility.
+ * Reference data and Pixi project checkouts are stored under
+ * params.db_dir.
+ *
+ * No Singularity or Apptainer containers are required.
  */
+
 nextflow.enable.dsl = 2
 
+
 // ============================================================================
-// CONTAINER INSTALLATION
+// CONDA ENVIRONMENT INSTALLATION
 // ============================================================================
-// This process pulls an image from a list of images in the install_containers workflow. 
-// It uses singularity to run and pull it.
-process INSTALL_IMAGE {
+
+/*
+ * Nextflow creates the environment automatically before the process runs.
+ * The environment is cached using conda.cacheDir.
+ *
+ * Each task accepts a YAML recipe and reports successful initialization.
+ */
+
+process INSTALL_ENV {
     tag "$name"
     label 'install'
-    storeDir "${params.container_dir}"
+
+    conda { env_yaml }
 
     input:
-    tuple val(name), val(source)
+    tuple val(name), val(env_yaml)
 
     output:
-    tuple val(name), path("${name}.sif"), emit: image
-    tuple val(name), path("${name}.source.txt"), emit: provenance
+    val(name), emit: ready
 
     script:
-    def safeSource = "'" + source.replace("'", "'\\''") + "'"
     """
     set -euo pipefail
-    source_uri=${safeSource}
-
-    # A temporary convenience for published BioContainers repositories.
-    # This looks up a concrete tag when the task runs. Pin the resolved URI
-    # in the manifest for reproducibility after first successful testing.
-    if [[ "\$source_uri" == quay-auto:* ]]; then
-        repository="\${source_uri#quay-auto:}"
-        source_uri=\$(python3 - "\$repository" <<'PY_RESOLVE'
-import json, sys, urllib.parse, urllib.request
-repo = sys.argv[1]
-url = ('https://quay.io/api/v1/repository/biocontainers/'
-       + urllib.parse.quote(repo, safe='')
-       + '/tag/?limit=100&onlyActiveTags=true')
-with urllib.request.urlopen(url, timeout=60) as response:
-    obj = json.load(response)
-tags = [t for t in obj.get('tags', []) if t.get('name') and t['name'] != 'latest']
-if not tags:
-    raise SystemExit('No published BioContainers tags found for ' + repo)
-tags.sort(key=lambda t: t.get('last_modified') or '', reverse=True)
-print('docker://quay.io/biocontainers/' + repo + ':' + tags[0]['name'])
-PY_RESOLVE
-        )
-    fi
-
-    printf '%s\\n' "\$source_uri" > ${name}.source.txt
-    singularity pull ${name}.sif "\$source_uri"
-    test -s ${name}.sif
+    echo "Conda environment initialized: ${name}"
+    echo "Recipe: ${env_yaml}"
+    echo "Environment prefix: \$CONDA_PREFIX"
     """
 }
 
+
 // ============================================================================
-// REFERENCE DATA INSTALLATION
+// REFERENCE DATABASE INSTALLATION
 // ============================================================================
-// CheckM1 is retained for dRep's optional internal genome-quality filtering.
+
+// ----------------------------------------------------------------------------
+// CheckM1 (called by drep - not default)
+// ----------------------------------------------------------------------------
+
 process INSTALL_CHECKM1_DB {
     label 'install'
     storeDir "${params.db_dir}/checkm1_db"
 
+    conda "${projectDir}/envs/drep.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'checkm_data', emit: db
@@ -83,19 +74,28 @@ process INSTALL_CHECKM1_DB {
     script:
     """
     set -euo pipefail
+
     mkdir -p checkm_data
     wget -O checkm_data.tar.gz '${params.checkm1_data_url}'
+
     tar -xzf checkm_data.tar.gz -C checkm_data
     rm checkm_data.tar.gz
     """
 }
 
+
+// ----------------------------------------------------------------------------
+// CheckM2
+// ----------------------------------------------------------------------------
+
 process INSTALL_CHECKM2_DB {
     label 'install'
     storeDir "${params.db_dir}/checkm2_data"
 
+    conda "${projectDir}/envs/checkm2.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'checkm2_db', emit: db
@@ -103,18 +103,27 @@ process INSTALL_CHECKM2_DB {
     script:
     """
     set -euo pipefail
+
     mkdir -p checkm2_db
-    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
-        checkm2 database --download --path "\$(pwd)/checkm2_db"
+
+    checkm2 database --download \
+        --path "\$(pwd)/checkm2_db"
     """
 }
+
+
+// ----------------------------------------------------------------------------
+// GTDB-Tk
+// ----------------------------------------------------------------------------
 
 process INSTALL_GTDBTK_DB {
     label 'install'
     storeDir "${params.db_dir}/gtdbtk_db"
 
+    conda "${projectDir}/envs/gtdbtk.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'gtdbtk_data', emit: db
@@ -122,19 +131,33 @@ process INSTALL_GTDBTK_DB {
     script:
     """
     set -euo pipefail
+
     mkdir -p gtdbtk_data
-    wget -O gtdbtk_data.tar.gz '${params.gtdbtk_data_url}'
-    tar -xzf gtdbtk_data.tar.gz -C gtdbtk_data --strip-components=1
+
+    wget -O gtdbtk_data.tar.gz \
+        '${params.gtdbtk_data_url}'
+
+    tar -xzf gtdbtk_data.tar.gz \
+        -C gtdbtk_data \
+        --strip-components=1
+
     rm gtdbtk_data.tar.gz
     """
 }
+
+
+// ----------------------------------------------------------------------------
+// BUSCO
+// ----------------------------------------------------------------------------
 
 process INSTALL_BUSCO_DB {
     label 'install'
     storeDir "${params.db_dir}/busco_data"
 
+    conda "${projectDir}/envs/busco.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'busco_datasets', emit: db
@@ -142,21 +165,38 @@ process INSTALL_BUSCO_DB {
     script:
     """
     set -euo pipefail
+
     mkdir -p busco_datasets
-    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
-        busco --download '${params.busco_lineage ?: 'eukaryota_odb10'}' \\
+
+    busco --download \
+        '${params.busco_lineage ?: 'eukaryota_odb10'}' \
         --download_path "\$(pwd)/busco_datasets"
     """
 }
 
-// NOTE: These images must contain BOTH git and pixi. Their Pixi environments
-// are installed to writable work directories, never into a read-only SIF.
+
+// ----------------------------------------------------------------------------
+// GVClass
+// ----------------------------------------------------------------------------
+
+/*
+ * Conda provides Git and Pixi.
+ *
+ * The GVClass project is cloned into the Nextflow task directory.
+ * Pixi installs its own locked environment inside the checkout.
+ *
+ * setup-db downloads reference resources into the project checkout,
+ * which is persisted under params.db_dir.
+ */
+
 process INSTALL_GVCLASS_DB {
     label 'install'
     storeDir "${params.db_dir}/gvclass_install"
 
+    conda "${projectDir}/envs/pixi_tools.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'gvclass', emit: db
@@ -164,18 +204,37 @@ process INSTALL_GVCLASS_DB {
     script:
     """
     set -euo pipefail
+
     git clone '${params.gvclass_repo_url}' gvclass
-    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
-        bash -c 'cd gvclass && pixi install --frozen && pixi run setup-db'
+
+    cd gvclass
+
+    pixi install --frozen
+    pixi run setup-db
     """
 }
+
+
+// ----------------------------------------------------------------------------
+// SSUextract
+// ----------------------------------------------------------------------------
+
+/*
+ * SSUextract is a nested Nextflow/Pixi project.
+ *
+ * Its repository and downloaded resources are stored in params.db_dir.
+ *
+ * The nested Nextflow task time limits are removed.
+ */
 
 process INSTALL_SSUEXTRACT_DB {
     label 'install'
     storeDir "${params.db_dir}"
 
+    conda "${projectDir}/envs/pixi_tools.yml"
+
     input:
-    path image
+    val ready
 
     output:
     path 'ssuextract_install', emit: db
@@ -183,16 +242,34 @@ process INSTALL_SSUEXTRACT_DB {
     script:
     """
     set -euo pipefail
+
     git clone '${params.ssuextract_repo_url}' ssuextract_install
-    sed -i '/^[[:space:]]*time[[:space:]]*=/d' ssuextract_install/config/base.config
-    singularity exec --bind "\$(pwd):\$(pwd)" "${image}" \\
-        bash -c 'cd ssuextract_install && pixi install --frozen && pixi run setup --database_profile ${params.ssuextract_db_profile ?: 'curated'}'
+
+    cd ssuextract_install
+
+    sed -i '/^[[:space:]]*time[[:space:]]*=/d' \
+        config/base.config
+
+    pixi install --frozen
+
+    pixi run setup \
+        --database_profile \
+        '${params.ssuextract_db_profile ?: 'curated'}' \
+        --database_path "\$(pwd)/resources/database"
     """
 }
+
+
+// ----------------------------------------------------------------------------
+// Rfam RF01960 covariance model
+// ----------------------------------------------------------------------------
 
 process INSTALL_RFAM_DB {
     label 'install'
     storeDir "${params.db_dir}/rfam_cm"
+
+    input:
+    val ready
 
     output:
     path 'RF01960.cm', emit: db
@@ -200,70 +277,124 @@ process INSTALL_RFAM_DB {
     script:
     """
     set -euo pipefail
-    wget -O RF01960.cm '${params.rfam_eukarya_cm_url}'
+
+    wget -O RF01960.cm \
+        '${params.rfam_eukarya_cm_url}'
+
     test -s RF01960.cm
     """
 }
 
+
 // ============================================================================
-// WORKFLOWS
+// WORKFLOW: INSTALL_ENVS
 // ============================================================================
-workflow INSTALL_CONTAINERS {
+
+workflow INSTALL_ENVS {
+
     main:
-    // Hardcoded image inventory. No params.container_uris map is required.
-    // TODO: Pin concrete tags for quay-auto entries after the first test.
-    // TODO: Replace null for five compound environments with VERIFIED URIs.
-    def sources = [
-        myloasm:     'quay-auto:myloasm',
-        // contains samtools=1.24 and minimap2=2.31-r1302
-        mapping:     'docker://quay.io/biocontainers/mulled-v2-66534bcbb7031a148b13e2ad42583020b9cd25c4:ad4c240457048f1d3cc0bd8c8fa39bf27d222eb7-0', 
-        metabat2:    'quay-auto:metabat2',
-        semibin2:    'quay-auto:semibin',
-        remag:       'quay-auto:remag',
-        drep:        'quay-auto:drep',
-        checkm2:     'quay-auto:checkm2',
-        busco:       'quay-auto:busco',
-        gtdbtk:      'quay-auto:gtdbtk',
-        gvclass:     null, // NEEDS git + pixi in ONE image
-        genometools: 'quay-auto:genometools-genometools',
-        ssuextract:  null, // NEEDS git + pixi in ONE image
-        cmsearch:    null, // NEEDS infernal + samtools + seqkit in ONE image
-        report:      null  // NEEDS pandas + openpyxl in ONE image
+
+    /*
+     * All Conda environment definitions used by the pipeline.
+     * Additional YAML files can be added to this inventory.
+     */
+
+    def environmentNames = [
+        'myloasm',
+        'mapping',
+        'metabat2',
+        'semibin',
+        'remag',
+        'drep',
+        'checkm2',
+        'busco',
+        'gtdbtk',
+        'genometools',
+        'infernal',
+        'dastool',
+        'pixi_tools',
+        'report'
     ]
 
-    def missing = sources.findAll { name, uri -> !uri }.keySet()
-    if (missing) {
-        error("Missing published image URI(s) in modules/install.nf for: ${missing.join(', ')}. " +
-              "These multi-tool environments need verified combined images before a full install.")
+    // Verify that every YAML recipe exists.
+    environmentNames.each { name ->
+        def recipe = file("${projectDir}/envs/${name}.yml")
+        if (!recipe.exists()) {
+            error("Missing Conda environment definition: ${recipe}")
+        }
     }
 
-    ch_specs = Channel.fromList(sources.collect { name, uri -> tuple(name, uri) })
-    INSTALL_IMAGE(ch_specs)
+    // Supply absolute recipe paths to Nextflow.
+    ch_envs = Channel.fromList(
+        environmentNames.collect { name ->
+            tuple(
+                name,
+                file("${projectDir}/envs/${name}.yml")
+                    .toAbsolutePath()
+                    .toString()
+            )
+        }
+    )
+
+    INSTALL_ENV(ch_envs)
 
     emit:
-    images     = INSTALL_IMAGE.out.image
-    provenance = INSTALL_IMAGE.out.provenance
+    ready = INSTALL_ENV.out.ready
 }
 
+
+// ============================================================================
+// WORKFLOW: INSTALL_DATABASES
+// ============================================================================
+
 workflow INSTALL_DATABASES {
+
     take:
-    ch_images
+    ch_ready
 
     main:
-    ch_drep       = ch_images.filter { name, image -> name == 'drep'       }.map { name, image -> image }.first()
-    ch_checkm2    = ch_images.filter { name, image -> name == 'checkm2'    }.map { name, image -> image }.first()
-    ch_gtdbtk     = ch_images.filter { name, image -> name == 'gtdbtk'     }.map { name, image -> image }.first()
-    ch_busco      = ch_images.filter { name, image -> name == 'busco'      }.map { name, image -> image }.first()
-    ch_gvclass    = ch_images.filter { name, image -> name == 'gvclass'    }.map { name, image -> image }.first()
-    ch_ssuextract = ch_images.filter { name, image -> name == 'ssuextract' }.map { name, image -> image }.first()
+
+    // When a container is ready, it produces ch_ready.
+    // Databases are installed when ch_ready is available.
+
+    ch_drep = ch_ready
+        .filter { it == 'drep' }
+        .first()
+
+    ch_checkm2 = ch_ready
+        .filter { it == 'checkm2' }
+        .first()
+
+    ch_gtdbtk = ch_ready
+        .filter { it == 'gtdbtk' }
+        .first()
+
+    ch_busco = ch_ready
+        .filter { it == 'busco' }
+        .first()
+
+    ch_pixi = ch_ready
+        .filter { it == 'pixi_tools' }
+        .first()
+
+    ch_infernal = ch_ready
+        .filter { it == 'infernal' }
+        .first()
+
+    // Each database process starts independently as soon as
+    // its corresponding environment is initialized.
 
     INSTALL_CHECKM1_DB(ch_drep)
     INSTALL_CHECKM2_DB(ch_checkm2)
     INSTALL_GTDBTK_DB(ch_gtdbtk)
     INSTALL_BUSCO_DB(ch_busco)
-    INSTALL_GVCLASS_DB(ch_gvclass)
-    INSTALL_SSUEXTRACT_DB(ch_ssuextract)
-    INSTALL_RFAM_DB()
+
+    // These share the same Conda environment but install
+    // their own separate Pixi projects and reference data.
+    INSTALL_GVCLASS_DB(ch_pixi)
+    INSTALL_SSUEXTRACT_DB(ch_pixi)
+
+    INSTALL_RFAM_DB(ch_infernal)
 
     emit:
     checkm1    = INSTALL_CHECKM1_DB.out.db
@@ -275,18 +406,31 @@ workflow INSTALL_DATABASES {
     rfam       = INSTALL_RFAM_DB.out.db
 }
 
+
+// ============================================================================
+// WORKFLOW: INSTALL_ALL
+// ============================================================================
+
+
 workflow INSTALL_ALL {
+
     main:
-    INSTALL_CONTAINERS()
-    INSTALL_DATABASES(INSTALL_CONTAINERS.out.images)
+
+    // Initialize all Conda environments concurrently.
+    INSTALL_ENVS()
+
+    // Each completed environment immediately emits its name.
+    // Database installers receive their individual ready signals.
+    INSTALL_DATABASES(INSTALL_ENVS.out.ready)
 
     emit:
-    images     = INSTALL_CONTAINERS.out.images
-    checkm1    = INSTALL_DATABASES.out.checkm1
-    checkm2    = INSTALL_DATABASES.out.checkm2
-    gtdbtk     = INSTALL_DATABASES.out.gtdbtk
-    busco      = INSTALL_DATABASES.out.busco
-    gvclass    = INSTALL_DATABASES.out.gvclass
-    ssuextract = INSTALL_DATABASES.out.ssuextract
-    rfam       = INSTALL_DATABASES.out.rfam
+    environments = INSTALL_ENVS.out.ready
+    checkm1      = INSTALL_DATABASES.out.checkm1
+    checkm2      = INSTALL_DATABASES.out.checkm2
+    gtdbtk       = INSTALL_DATABASES.out.gtdbtk
+    busco        = INSTALL_DATABASES.out.busco
+    gvclass      = INSTALL_DATABASES.out.gvclass
+    ssuextract   = INSTALL_DATABASES.out.ssuextract
+    rfam         = INSTALL_DATABASES.out.rfam
 }
+

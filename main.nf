@@ -251,14 +251,16 @@ workflow {
 
     } else if (params.install_databases) {
 
-        ch_images = Channel.fromPath(
-            "${params.container_dir}/*.sif",
-            checkIfExists: true
-        ).map { image ->
-            tuple(image.baseName, image)
-        }
+         ch_ready = Channel.fromList([
+            'drep',
+            'checkm2',
+            'gtdbtk',
+            'busco',
+            'pixi_tools',
+            'infernal'
+        ])
 
-        INSTALL_DATABASES(ch_images)
+        INSTALL_DATABASES(ch_ready)
 
     } else {
         // ================= RUN GENOME PIPELINE =================
