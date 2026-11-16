@@ -379,6 +379,104 @@ nextflow run main.nf \
   --run_gtdbtk       false \
   -resume
 ```
+## Working on HPC systems
+
+The pipeline supports execution on high-performance computing (HPC) systems through Nextflow's built-in job scheduler integration. Nextflow automatically submits individual pipeline processes as separate jobs, using the CPU and memory requirements specified in `nextflow.config`.
+
+**Local execution is the default.** Users running on HPC systems can select their job scheduler using a Nextflow profile.
+
+### Selecting a job scheduler
+
+Scheduler profiles are defined in `conf/hpc.config` and loaded automatically by `nextflow.config`.
+
+| Scheduler | Profile | Command option |
+|---|---|---|
+| Local (default) | None required | No `-profile` needed |
+| SLURM | `slurm` | `-profile slurm` |
+| PBS Pro | `pbs` | `-profile pbs` |
+| Sun Grid Engine | `sge` | `-profile sge` |
+| LSF | `lsf` | `-profile lsf` |
+
+For example, to run the pipeline using SLURM:
+
+```bash
+nextflow run main.nf \
+  -profile slurm \
+  --input_fgz data/sample01.fastq.gz \
+  --outdir results/sample01 \
+  -resume
+```
+
+Installation tasks are local-only due to many worker-nodes being unable to connect to the internet. If your system allows more flexibility, you can relax this requirement in the by commenting out the lines below in the 'process' block of `nextflow.config`. 
+```
+withLabel: 'install' {
+        executor = 'local'
+    }
+```
+
+### Institution-specific HPC configurations
+
+HPC systems often require additional settings, such as job partitions, allocation accounts, submission limits, or cluster-specific resource requirements.
+
+The [nf-core institutional configuration repository](https://nf-co.re/configs) provides an extensive collection of example Nextflow configurations for HPC systems worldwide. The corresponding configuration files are available at [github.com/nf-core/configs](https://github.com/nf-core/configs).
+
+Users can either manually edit the `conf/hpc.config` file or adapt an appropriate configuration for their institution and supply it using Nextflow's `-c` option:
+
+```bash
+nextflow run main.nf \
+  -profile slurm \
+  -c my_cluster.config \
+  --input_fgz data/sample01.fastq.gz \
+  --outdir results/sample01 \
+  -resume
+```
+
+For example, a SLURM cluster configuration might contain:
+
+```groovy
+process {
+    queue = 'normal'
+    clusterOptions = '--account=my_account'
+}
+
+executor {
+    queueSize = 20
+}
+```
+
+Multiple configuration files can be supplied:
+
+```bash
+nextflow run main.nf \
+  -profile slurm \
+  -c my_cluster.config,my_resources.config \
+  --input_fgz data/sample01.fastq.gz \
+  --outdir results/sample01 \
+  -resume
+```
+
+The `-c` option merges user configurations with the pipeline defaults. Existing parameters and resource requirements remain in effect unless explicitly overridden.
+
+### Installing software and databases on HPC systems
+
+The pipeline separates software and reference database installation from analysis.
+
+Installation processes use the **local executor**, regardless of whether or not an HPC profile is specified. This allows users to perform installation on login or build nodes where software installation is permitted.
+
+Once installation is complete, subsequent analysis runs do not invoke installation processes unless installation is explicitly requested.
+
+Conda environments, Pixi-managed applications, and reference databases must be accessible from the compute nodes. Users can configure their locations through `conda_cache_dir`, `software_dir`, and `db_dir` in `nextflow.config` or through pipeline parameters.
+
+### Launching Nextflow through the scheduler
+
+On some HPC systems, it is preferable or required to launch the main Nextflow process through a job that manages the submission of all the other jobs rather than keeping it running on a login node.
+
+For SLURM, users can create a batch script that starts Nextflow with `-profile slurm`. The main batch job manages the workflow, while Nextflow submits individual analysis processes as additional SLURM jobs. 
+
+The main Nextflow job must remain running until the workflow completes, but can be launched with minimal compute requirements.
+
+For additional information, consult the [Nextflow executor documentation](https://www.nextflow.io/docs/latest/executor.html) and the [nf-core HPC configuration examples](https://nf-co.re/configs).
+
 
 ## Runtime announcement
 
