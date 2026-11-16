@@ -23,8 +23,8 @@ nextflow.enable.dsl = 2
 // ============================================
 
 include { 
-    INSTALL_CONTAINERS,
-    INSTALL_DATABASES,
+    INSTALL_CONTAINERS
+    INSTALL_DATABASES
     INSTALL_ALL
 } from './modules/install.nf'
 
