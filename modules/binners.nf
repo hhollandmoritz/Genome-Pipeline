@@ -1,7 +1,7 @@
 process DEPTH {
     tag "$root"
     label 'binning'
-    conda "bioconda::metabat2"
+    conda "${projectDir}/envs/metabat2.yml"
 
     input:
     tuple val(root), path(bam), path(bai)
@@ -18,7 +18,7 @@ process DEPTH {
 process METABAT2 {
     tag "$root"
     label 'binning'
-    conda "bioconda::metabat2"
+    conda "${projectDir}/envs/metabat2.yml"
     publishDir { "${params.outdir}/${root}_metabat" }, mode: params.publish_mode
 
     input:
@@ -37,7 +37,7 @@ process METABAT2 {
 process SEMIBIN2 {
     tag "${root}:${model}"
     label 'binning'
-    conda "bioconda::semibin"
+    conda "${projectDir}/envs/semibin.yml"
     publishDir { "${params.outdir}/${root}_semibin/${model}_model" }, mode: params.publish_mode
 
     input:
