@@ -245,9 +245,9 @@ workflow {
 
         INSTALL_ALL()
 
-    } else if (params.install_containers) {
+    } else if (params.install_software) {
 
-        INSTALL_CONTAINERS()
+        INSTALL_ENVS()
 
     } else if (params.install_databases) {
 
