@@ -1,0 +1,8 @@
+# CHECKM2: bacterial completeness/contamination
+# TODO: confirm version pins against the conda directive in the matching upstream module.
+name: gp_checkm2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - checkm2

@@ -1,0 +1,9 @@
+# CM_MODEL + CMSEARCH (legacy fast mode). If esl-sfetch is missing after solve, add 'easel'.
+# TODO: confirm version pins against the conda directive in the matching upstream module.
+name: gp_infernal
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - infernal=1.1.5
+  - samtools

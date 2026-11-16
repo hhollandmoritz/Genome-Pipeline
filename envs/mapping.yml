@@ -1,0 +1,9 @@
+# MAPPING: minimap2 + samtools sort/index
+# TODO: confirm version pins against the conda directive in the matching upstream module.
+name: gp_mapping
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - minimap2
+  - samtools
