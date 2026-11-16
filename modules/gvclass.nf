@@ -25,7 +25,7 @@ process FNA_PREP {
             gt splitfasta -targetsize ${params.gvclass_max_bin_size_mb}000000 "\$bin"
             mv "\$bin".* fna_prepped/ 2>/dev/null || true
             n_parts=\$(ls "\$bin".* 2>/dev/null | wc -l)
-            echo -e "${root}\t\$(basename "\$bin")\t\${size_mb}MB\t\${n_parts} parts" >> subsampled_bins.tsv
+            echo -e "${root}\\t\$(basename "\$bin")\\t\${size_mb}MB\\t\${n_parts} parts" >> subsampled_bins.tsv
         else
             cp "\$bin" fna_prepped/
         fi
@@ -69,7 +69,7 @@ process COLLECT_SUBSAMPLE_REPORT {
 
     script:
     """
-    echo -e "sample\tbin\toriginal_size\tparts" > gvclass_subsampled_bins_summary.tsv
+    echo -e "sample\\tbin\\toriginal_size\\tparts" > gvclass_subsampled_bins_summary.tsv
     cat ${reports.join(' ')} >> gvclass_subsampled_bins_summary.tsv 2>/dev/null || true
     """
 }
