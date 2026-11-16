@@ -1,5 +1,4 @@
 # REMAG. CPU-only PyTorch build forced; drop the pytorch line if you want GPU.
-# TODO: confirm version pins against the conda directive in the matching upstream module.
 name: gp_remag
 channels:
   - conda-forge

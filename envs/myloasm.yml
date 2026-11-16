@@ -1,5 +1,4 @@
 # MYLOASM: long-read assembly
-# TODO: confirm version pins against the conda directive in the matching upstream module.
 name: gp_myloasm
 channels:
   - conda-forge

@@ -1,5 +1,4 @@
 # DAS_TOOL: cross-method bin consensus
-# TODO: confirm version pins against the conda directive in the matching upstream module.
 name: gp_dastool
 channels:
   - conda-forge

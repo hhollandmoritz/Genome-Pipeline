@@ -1,5 +1,4 @@
 # DREP: dRep + CheckM1 in one env. Pins carried from your zip draft.
-# TODO: confirm version pins against the conda directive in the matching upstream module.
 name: gp_drep
 channels:
   - conda-forge

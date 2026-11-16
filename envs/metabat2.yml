@@ -1,5 +1,4 @@
 # DEPTH + METABAT2: jgi_summarize_bam_contig_depths ships with metabat2
-# TODO: confirm version pins against the conda directive in the matching upstream module.
 name: gp_metabat2
 channels:
   - conda-forge
