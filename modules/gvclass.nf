@@ -77,7 +77,7 @@ process COLLECT_SUBSAMPLE_REPORT {
     publishDir "${params.outdir}", mode: params.publish_mode
 
     input:
-    path reports
+    path reports, stageAs: 'subsample_report??.tsv'
 
     output:
     path "gvclass_subsampled_bins_summary.tsv"
