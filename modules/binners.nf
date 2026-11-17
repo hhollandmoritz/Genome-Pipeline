@@ -11,6 +11,7 @@ process DEPTH {
 
     script:
     """
+    export OMP_NUM_THREADS=${task.cpus}
     jgi_summarize_bam_contig_depths --outputDepth "${root}_depth.txt" "${bam}"
     """
 }
@@ -48,6 +49,6 @@ process SEMIBIN2 {
 
     script:
     """
-    SemiBin2 single_easy_bin --sequencing-type long_read ${mode_flag} -i "${assembly}" -b "${bam}" -o .
+    SemiBin2 single_easy_bin --sequencing-type long_read ${mode_flag} -i "${assembly}" -b "${bam}" -o . -t ${task.cpus}
     """
 }

@@ -27,7 +27,7 @@ process REMAG {
 
     script:
     """
-    remag "${assembly}" -c "${bam}" -o . --save-filtered-contigs
+    remag "${assembly}" -c "${bam}" -o . --save-filtered-contigs -t ${task.cpus}
     """
 }
 
