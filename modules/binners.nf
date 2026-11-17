@@ -30,7 +30,7 @@ process METABAT2 {
     script:
     """
     mkdir -p bins
-    metabat2 -i "${assembly}" -a "${depth_path}" -o bins/metabat
+    metabat2 -i "${assembly}" -a "${depth_path}" -o bins/metabat -t ${task.cpus}
     """
 }
 
