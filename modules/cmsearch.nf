@@ -29,7 +29,7 @@ process SSU_EXTRACT {
     """
     cd "${install_dir}"
     pixi run ssuextract -q "\$OLDPWD/${mylo_assembly}" --outdir "\$OLDPWD/results" ${tree_flag} \\
-        --database_path "${params.db_dir}/ssuextract_install/resources/database" \\
+        --database_path "${params.db_dir}/ssuextract" \\
         --database_profile ${params.ssuextract_db_profile}
     """
 }
@@ -39,7 +39,7 @@ workflow SSU_EXTRACT_ALL {
     assembly   // tuple(root, mylo_assembly)
 
     main:
-    ch_install_dir = Channel.value(file("${params.db_dir}/ssuextract_install", checkIfExists: true).toAbsolutePath().toString())
+    ch_install_dir = Channel.value(file("${params.software_dir}/ssuextract", checkIfExists: true).toAbsolutePath().toString())
     SSU_EXTRACT(assembly, ch_install_dir)
 
     emit:

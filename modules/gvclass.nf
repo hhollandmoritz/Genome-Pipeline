@@ -49,6 +49,7 @@ process GVCLASS {
 
      script:
     """
+    export GVCLASS_DB="${params.db_dir}/gvclass"
     task_dir="\$(pwd)"
     cd "${install_dir}"
     pixi run ./gvclass -o "\${task_dir}/gvclass_out" -t ${params.threads_gvclass} "\${task_dir}/${fna_dir}"
@@ -79,7 +80,7 @@ workflow GVCLASS_TAXONOMY {
     derep_dir   // tuple(root, dir)
 
     main:
-    ch_install_dir = Channel.value(file("${params.db_dir}/gvclass_install/gvclass", checkIfExists: true).toAbsolutePath().toString())
+    ch_install_dir = Channel.value(file("${params.software_dir}/gvclass", checkIfExists: true).toAbsolutePath().toString())
     FNA_PREP(derep_dir)
     GVCLASS(FNA_PREP.out.fna_dir, ch_install_dir)
     COLLECT_SUBSAMPLE_REPORT(FNA_PREP.out.subsampled.collect())
