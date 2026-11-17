@@ -15,7 +15,7 @@ process CHECKM2 {
     script:
     """
     export CHECKM2DB="\$(pwd)/${checkm2_db}/CheckM2_database/uniref100.KO.1.dmnd"
-    checkm2 predict --threads ${params.threads_checkm2} --input "${derep_dir}" -x fa \\
+    checkm2 predict --threads ${task.cpus} --input "${derep_dir}" -x fa \\
         --output-directory checkm2_out
     cp checkm2_out/quality_report.tsv .
     """
