@@ -1,18 +1,3 @@
-process GVCLASS_SETUP {
-    label 'small'
-    storeDir "${params.db_dir}/gvclass_install"
-    conda "conda-forge::pixi conda-forge::git"
-
-    output:
-    path "gvclass", emit: install_dir
-
-    script:
-    """
-    git clone ${params.gvclass_repo_url} gvclass
-    cd gvclass && pixi install --frozen && pixi run setup-db
-    """
-}
-
 /*
  * FNA_PREP now takes dRep's single output directly - no more separate
  * metabat/remag/semibin-unzipped inputs to merge, since there's only one
@@ -21,7 +6,7 @@ process GVCLASS_SETUP {
 process FNA_PREP {
     tag "$root"
     label 'gvclass'
-    conda "bioconda::genometools-genometools"
+    conda "${projectDir}/envs/genometools.yml"
 
     input:
     tuple val(root), path(derep_dir)
@@ -51,12 +36,12 @@ process FNA_PREP {
 process GVCLASS {
     tag "$root"
     label 'gvclass'
-    conda "conda-forge::pixi"
+    conda "${projectDir}/envs/pixi_tools.yml"
     publishDir { "${params.outdir}/${root}_gvclass" }, mode: params.publish_mode
 
     input:
     tuple val(root), path(fna_dir)
-    path install_dir
+    val install_dir
 
     output:
     tuple val(root), path("gvclass_summary.tsv"), emit: summary
@@ -64,6 +49,7 @@ process GVCLASS {
 
      script:
     """
+    export GVCLASS_DB="${params.db_dir}/gvclass"
     task_dir="\$(pwd)"
     cd "${install_dir}"
     pixi run ./gvclass -o "\${task_dir}/gvclass_out" -t ${params.threads_gvclass} "\${task_dir}/${fna_dir}"
@@ -94,9 +80,9 @@ workflow GVCLASS_TAXONOMY {
     derep_dir   // tuple(root, dir)
 
     main:
-    GVCLASS_SETUP()
+    ch_install_dir = Channel.value(file("${params.software_dir}/gvclass", checkIfExists: true).toAbsolutePath().toString())
     FNA_PREP(derep_dir)
-    GVCLASS(FNA_PREP.out.fna_dir, GVCLASS_SETUP.out.install_dir.first())
+    GVCLASS(FNA_PREP.out.fna_dir, ch_install_dir)
     COLLECT_SUBSAMPLE_REPORT(FNA_PREP.out.subsampled.collect())
 
     emit:

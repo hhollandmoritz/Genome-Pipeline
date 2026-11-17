@@ -1,27 +1,8 @@
-
-// ---- reference package download, run once ----
-process GTDBTK_DB {
-    label 'taxonomy'
-    conda "bioconda::gtdbtk"
-    storeDir "${params.db_dir}/gtdbtk_db"
-
-    output:
-    path "gtdbtk_data", emit: db_dir
-
-    script:
-    """
-    mkdir -p gtdbtk_data
-    wget -O gtdbtk_data.tar.gz "${params.gtdbtk_data_url}"
-    tar -xzf gtdbtk_data.tar.gz -C gtdbtk_data --strip-components=1
-    rm gtdbtk_data.tar.gz
-    """
-}
-
 // ---- gtdbtk classify_wf, run once per sample on dRep's combined output ----
 process GTDBTK {
     tag "$root"
     label 'taxonomy'
-    conda "bioconda::gtdbtk"
+    conda "${projectDir}/envs/gtdbtk.yml"
     publishDir { "${params.outdir}/${root}_gtdbtk" }, mode: params.publish_mode
 
     input:
@@ -65,8 +46,8 @@ workflow GTDBTK_CLASSIFY {
     derep_dir   // tuple(root, dir)
 
     main:
-    GTDBTK_DB()
-    GTDBTK(derep_dir, GTDBTK_DB.out.db_dir)
+    ch_db = Channel.value(file("${params.db_dir}/gtdbtk_db/gtdbtk_data", checkIfExists: true))
+    GTDBTK(derep_dir, ch_db)
 
     emit:
     classify_dir = GTDBTK.out.classify_dir

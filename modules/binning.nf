@@ -15,7 +15,7 @@ include { DEPTH as DEPTH_REJECT; METABAT2 as METABAT2_REJECT; SEMIBIN2 as SEMIBI
 process REMAG {
     tag "$root"
     label 'binning'
-    conda "bioconda::remag"
+    conda "${projectDir}/envs/remag.yml"
     publishDir { "${params.outdir}/${root}_remag" }, mode: params.publish_mode
 
     input:
