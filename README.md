@@ -540,7 +540,7 @@ nextflow run main.nf \
 
 The pipeline supports execution on high-performance computing (HPC) systems through Nextflow's built-in job scheduler integration. Nextflow automatically submits individual pipeline processes as separate jobs, using the CPU and memory requirements specified in `nextflow.config`.
 
-**Local execution is the default.** Users running on HPC systems can select their job scheduler using a Nextflow profile.
+By default the pipeline runs in "local" mode(no job scheduler). Users running on HPC systems can select and configure their job scheduler using a Nextflow profile.
 
 ### Selecting a job scheduler
 
@@ -601,7 +601,7 @@ executor {
 }
 ```
 
-Multiple configuration files can be supplied:
+Extra configuration files can be supplied:
 
 ```bash
 nextflow run main.nf \
@@ -612,13 +612,13 @@ nextflow run main.nf \
   -resume
 ```
 
-The `-c` option merges user configurations with the pipeline defaults. Existing parameters and resource requirements remain in effect unless explicitly overridden.
+The `-c` option merges user configurations with the pipeline defaults. Existing parameters and resource requirements from nextflow.config will be used unless overridden in the config files supplied by the user.
 
 ### Installing software and databases on HPC systems
 
 The pipeline separates software and reference database installation from analysis.
 
-Installation processes use the **local executor**, regardless of whether or not an HPC profile is specified. This allows users to perform installation on login or build nodes where software installation is permitted.
+Installation processes use the local executor, regardless of whether or not an HPC profile is specified. This allows users to perform installation on login or build nodes where software installation is permitted.
 
 Once installation is complete, subsequent analysis runs do not invoke installation processes unless installation is explicitly requested.
 
