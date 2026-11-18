@@ -1,17 +1,37 @@
+
 process GVCLASS_SETUP {
     label 'small'
-    storeDir "${params.db_dir}/gvclass_install"
     conda "conda-forge::pixi conda-forge::git"
 
     output:
-    path "gvclass", emit: install_dir
+    val(install_dir), emit: install_dir
 
     script:
+    install_dir = file("${params.db_dir}/gvclass_install/gvclass").toAbsolutePath().toString()
+
     """
-    git clone ${params.gvclass_repo_url} gvclass
-    cd gvclass && pixi install --frozen && pixi run setup-db
+    INSTALL_DIR="${install_dir}"
+
+    # .setup_complete is created after pixi installation and database setup completes
+    # if it already exists, ssuextract will not be reinstalled. If it doesn't
+    # exist, creating the folder and cloning the repository will proceed.
+    if [ ! -f "\$INSTALL_DIR/.setup_complete" ]; then
+        mkdir -p "\$(dirname "\$INSTALL_DIR")"
+
+        if [ ! -d "\$INSTALL_DIR/.git" ]; then
+            git clone ${params.gvclass_repo_url} "\$INSTALL_DIR"
+        fi
+
+        cd "\$INSTALL_DIR"
+
+        pixi install --frozen
+        pixi run setup-db
+
+        touch .setup_complete
+    fi
     """
 }
+
 
 /*
  * FNA_PREP now takes dRep's single output directly - no more separate
@@ -56,7 +76,7 @@ process GVCLASS {
 
     input:
     tuple val(root), path(fna_dir)
-    path install_dir
+    val install_dir
 
     output:
     tuple val(root), path("gvclass_summary.tsv"), emit: summary
@@ -77,7 +97,7 @@ process COLLECT_SUBSAMPLE_REPORT {
     publishDir "${params.outdir}", mode: params.publish_mode
 
     input:
-    path reports
+    path reports, stageAs: 'subsample_report??.tsv'
 
     output:
     path "gvclass_subsampled_bins_summary.tsv"
