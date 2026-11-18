@@ -1,3 +1,38 @@
+
+process GVCLASS_SETUP {
+    label 'small'
+    conda "conda-forge::pixi conda-forge::git"
+
+    output:
+    val(install_dir), emit: install_dir
+
+    script:
+    install_dir = file("${params.db_dir}/gvclass_install/gvclass").toAbsolutePath().toString()
+
+    """
+    INSTALL_DIR="${install_dir}"
+
+    # .setup_complete is created after pixi installation and database setup completes
+    # if it already exists, ssuextract will not be reinstalled. If it doesn't
+    # exist, creating the folder and cloning the repository will proceed.
+    if [ ! -f "\$INSTALL_DIR/.setup_complete" ]; then
+        mkdir -p "\$(dirname "\$INSTALL_DIR")"
+
+        if [ ! -d "\$INSTALL_DIR/.git" ]; then
+            git clone ${params.gvclass_repo_url} "\$INSTALL_DIR"
+        fi
+
+        cd "\$INSTALL_DIR"
+
+        pixi install --frozen
+        pixi run setup-db
+
+        touch .setup_complete
+    fi
+    """
+}
+
+
 /*
  * FNA_PREP now takes dRep's single output directly - no more separate
  * metabat/remag/semibin-unzipped inputs to merge, since there's only one

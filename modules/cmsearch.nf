@@ -9,6 +9,48 @@
  * Archaea are covered through SILVA's 16S taxonomy, not a separate model.
  */
 
+process SSUEXTRACT_SETUP {
+    label 'ssuextract'
+    conda "conda-forge::git conda-forge::pixi"
+
+    output:
+    val(install_dir), emit: install_dir
+
+    script:
+    // change install directory so that pixi does not get confused in the work folder
+    install_dir = file("${params.db_dir}/ssuextract_install").toAbsolutePath().toString()
+    """
+    INSTALL_DIR="${install_dir}"
+
+    # .setup_complete is created after pixi installation and database setup completes
+    # if it already exists, ssuextract will not be reinstalled. If it doesn't
+    # exist, creating the folder and cloning the repository will proceed.
+    if [ ! -f "\$INSTALL_DIR/.setup_complete" ]; then
+        mkdir -p "\$(dirname "\$INSTALL_DIR")"
+
+        if [ ! -d "\$INSTALL_DIR/.git" ]; then
+            git clone ${params.ssuextract_repo_url} "\$INSTALL_DIR"
+        fi
+
+        cd "\$INSTALL_DIR"
+
+        # SSUextract is its own nested Nextflow pipeline with its own internal
+        # per-process time limit (config/base.config), separate from anything
+        # in OUR nextflow.config - raising our own threads_cmsearch has no
+        # effect on it. Strip the time limit so long BLAST/annotation steps
+        # on large assemblies aren't killed mid-run by the inner pipeline's
+        # own unrelated timeout.
+
+        sed -i '/^[[:space:]]*time[[:space:]]*=/d' config/base.config
+
+        pixi install --frozen
+        pixi run setup --database_profile ${params.ssuextract_db_profile}
+
+        touch .setup_complete
+    fi
+    """
+}
+
 process SSU_EXTRACT {
     tag "$root"
     label 'ssuextract'
