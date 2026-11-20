@@ -241,7 +241,9 @@ workflow GVCLASS_TAXONOMY {
     FNA_PREP(derep_dir)
     // Expand each sample's directory list into separate GVClass jobs.
     ch_gvclass_groups = FNA_PREP.out.fna_dirs.flatMap { root, dirs ->
-        dirs.collect { dir ->
+        def group_dirs = (dirs instanceof List) ? dirs : [dirs]
+
+        group_dirs.collect { dir ->
             tuple(root, dir.name, dir)
         }
     }
