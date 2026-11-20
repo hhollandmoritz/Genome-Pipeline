@@ -16,7 +16,7 @@
 
 ## Time - make sure that the executor job for nextflow
 ## runs for at least as long as it takes to finish the whole analysis.
-#SBATCH --time=24:00:00
+#SBATCH --time=72:00:00
 ## Jobs can restart automatically if the cluster experiences
 ## an unforeseen issue.  This may not be desired if you want to retain
 ## the work that's been performed by your script so far. Default is no-requeue  

@@ -87,7 +87,7 @@ process GVCLASS {
     export GVCLASS_DB="${params.db_dir}/gvclass"
     task_dir="\$(pwd)"
     cd "${install_dir}"
-    pixi run ./gvclass -o "\${task_dir}/gvclass_out" -t ${params.threads_gvclass} "\${task_dir}/${fna_dir}"
+    pixi run ./gvclass -o "\${task_dir}/gvclass_out" -t ${task.cpus} "\${task_dir}/${fna_dir}"
     cd "\${task_dir}"
     cp gvclass_out/gvclass_summary.tsv .
     """
