@@ -34,10 +34,12 @@ process GVCLASS_SETUP {
 
 
 /*
- * FNA_PREP now takes dRep's single output directly - no more separate
- * metabat/remag/semibin-unzipped inputs to merge, since there's only one
- * bin source per sample now. Oversized-bin subsampling logic is unchanged.
+ * FNA_PREP prepares drep's output for GVCLASS. It breaks large bins into
+ * smaller sub-samples and splits bins into separate folders so that 
+ * gvclass can run them on separate nodes, increasing capacity on high
+ * compute systems.
  */
+
 process FNA_PREP {
     tag "$root"
     label 'gvclass'
@@ -47,26 +49,99 @@ process FNA_PREP {
     tuple val(root), path(derep_dir)
 
     output:
-    tuple val(root), path("fna_prepped"), emit: fna_dir
-    path "subsampled_bins.tsv", emit: subsampled, optional: true
+    tuple val(root), path("fna_prepped/*"), emit: fna_dirs
+    path "subsampled_bins.tsv", emit: subsampled
 
     script:
     """
-    mkdir -p fna_prepped
+    set -euo pipefail
+    shopt -s nullglob
+
+    mkdir -p fna_prepped split_work
     : > subsampled_bins.tsv
-    for bin in "${derep_dir}"/*.fa; do
+
+    max_bins=${params.gvclass_bins_per_job}
+    max_size_mb=${params.gvclass_max_bin_size_mb}
+
+    group_number=0
+    regular_count=0
+    total_bins=0
+    split_count=0
+
+    bins=( "${derep_dir}"/*.fa )
+
+    for bin in "\${bins[@]}"; do
+        # record information about bins
+        bin_name=\$(basename "\$bin")
+        bin_stem="\${bin_name%.fa}"
         size_mb=\$(du -m "\$bin" | cut -f1)
-        if [ "\$size_mb" -gt ${params.gvclass_max_bin_size_mb} ]; then
-            gt splitfasta -targetsize ${params.gvclass_max_bin_size_mb} "\$bin"
-            mv "\$bin".* fna_prepped/ 2>/dev/null || true
-            n_parts=\$(ls "\$bin".* 2>/dev/null | wc -l)
-            echo -e "${root}\\t\$(basename "\$bin")\\t\${size_mb}MB\\t\${n_parts} parts" >> subsampled_bins.tsv
+
+        total_bins=\$((total_bins + 1))
+
+        # Split the oversized bins into smaller fragments
+        # place in folders called "split_<bin_stem>"
+        if (( size_mb > max_size_mb )); then
+
+            # Make directory for split bins
+            split_dir="fna_prepped/split_\${bin_stem}"
+            mkdir -p "\$split_dir"
+
+            # Make a symlink to bin that we will split (gt will preserve the original bin file)
+            local_bin="split_work/$bin_name"
+            ln -s "$(realpath "$bin")" "$local_bin"
+
+            gt splitfasta -targetsize "\$max_size_mb" "\$local_bin"
+
+            fragments=( "\$local_bin".* )
+            n_parts=\${#fragments[@]}
+
+            # Rename fragments to valid FASTA extensions.
+            part=0
+            for fragment in "\${fragments[@]}"; do
+                part=\$((part + 1))
+                printf -v part_name '%s_part_%03d.fa' "\$bin_stem" "\$part"
+                mv "\$fragment" "\$split_dir/\$part_name"
+            done
+
+            rm -f "\$local_bin"
+            split_count=\$((split_count + 1))
+
+            printf '%s\\t%s\\t%s\\t%s\\n' \
+                "${root}" "\$bin_name" \
+                "\${size_mb}MB" "\${n_parts} parts" \
+                >> subsampled_bins.tsv
+
+        # else -> (size_mb <= max_size_mb)
+        # Move any smaller bins into groups according to max_bins_per_job parameter
+        # subdirectory is called 'group'
         else
-            cp "\$bin" fna_prepped/
+
+            # Regular bins are grouped by maximum bin count.
+            if (( regular_count % max_bins == 0 )); then
+                group_number=\$((group_number + 1))
+                printf -v group_dir \
+                    'fna_prepped/group_%03d' "\$group_number"
+                mkdir -p "\$group_dir"
+            fi
+
+            # we use symlinks rather than copying to save interrum space
+            ln -s "$(realpath "$bin")" "$group_dir/$bin_name"
+            regular_count=\$((regular_count + 1))
+
         fi
     done
+
+    rm -rf split_work
+
+    echo "FNA preparation complete for ${root}"
+    echo "Original bins: \$total_bins"
+    echo "Oversized bins: \$split_count"
+    echo "Regular groups: \$group_number"
+    echo "Output directories:"
+    find fna_prepped -mindepth 1 -maxdepth 1 -type d | sort
     """
 }
+
 
 process GVCLASS {
     tag "$root"
