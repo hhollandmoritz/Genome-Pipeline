@@ -74,4 +74,7 @@ nextflow run main.nf \
     --samplesheet "$HOME/incendi/genome_samplesheet.csv" \
     --outdir "$HOME/incendi/Genome_results" \
     --db_dir "$HOME/Genome-Pipeline/refdbs" \
+    --gvclass_bins_per_job 10 \
+    --threads_gvclass 24 \
+    --gvclass_max_bin_size_mb 50 \
     -resume
