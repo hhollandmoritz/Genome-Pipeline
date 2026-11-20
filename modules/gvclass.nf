@@ -87,7 +87,7 @@ process FNA_PREP {
             mkdir -p "\$split_dir"
 
             # Make a symlink to bin that we will split (gt will preserve the original bin file)
-            local_bin="split_work/$bin_name"
+            local_bin="split_work/\$bin_name"
             ln -s "\$(realpath "\$bin")" "\$local_bin"
 
             gt splitfasta -targetsize "\$max_size_mb" "\$local_bin"
