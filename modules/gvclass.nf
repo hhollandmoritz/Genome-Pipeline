@@ -152,6 +152,11 @@ process GVCLASS {
     label 'gvclass'
     conda "${projectDir}/envs/pixi_tools.yml"
 
+    publishDir {
+        "${params.outdir}/${root}_gvclass/gvclass_out"
+    }, mode: params.publish_mode,
+       saveAs: { filename -> filename.replaceFirst(/^gvclass_/, '') }
+
     input:
     tuple val(root), val(group), path(fna_dir)
     val install_dir
@@ -197,21 +202,20 @@ process COLLECT_SUBSAMPLE_REPORT {
 process MERGE_GVCLASS {
     tag "$root"
     label 'small'
-    publishDir { "${params.outdir}/${root}_gvclass" }, mode: params.publish_mode
+    publishDir { "${params.outdir}/${root}_gvclass" },
+        mode: params.publish_mode
 
     input:
-    tuple val(root), path(gvclass_result_dirs, stageAs: 'gvclass_results/*')
+    tuple val(root), path(gvclass_result_dirs,
+                        stageAs: 'gvclass_results/*')
 
     output:
-    tuple val(root), path("gvclass_all_bins_summary.tsv"), emit: summary
-    tuple val(root), path("gvclass_out"), emit: gvclass_dir
+    tuple val(root), path("gvclass_all_bins_summary.tsv"),
+        emit: summary
 
     script:
     """
     set -euo pipefail
-
-    mkdir -p gvclass_out
-
 
     first=true
     for gvclass_result_dir in gvclass_results/*; do
@@ -223,11 +227,6 @@ process MERGE_GVCLASS {
 
         tail -n +2 "\$gvclass_result_dir/gvclass_summary.tsv" >> gvclass_all_bins_summary.tsv
 
-        # Reorganize the GVClass output directories into gvclass_out/<groups>
-        group=\$(basename "\$gvclass_result_dir")
-        group=\${group#gvclass_}
-
-        cp -a "\$gvclass_result_dir" "gvclass_out/\$group"
     done
     """
 }
@@ -239,6 +238,11 @@ workflow GVCLASS_TAXONOMY {
     main:
     ch_install_dir = Channel.value(file("${params.software_dir}/gvclass", checkIfExists: true).toAbsolutePath().toString())
     FNA_PREP(derep_dir)
+    // Record the number of groups expected for each sample.
+    ch_gvclass_counts = FNA_PREP.out.fna_dirs.map { root, dirs ->
+        def group_dirs = (dirs instanceof List) ? dirs : [dirs]
+        tuple(root, group_dirs.size())
+    }
     // Expand each sample's directory list into separate GVClass jobs.
     ch_gvclass_groups = FNA_PREP.out.fna_dirs.flatMap { root, dirs ->
         def group_dirs = (dirs instanceof List) ? dirs : [dirs]
@@ -250,8 +254,17 @@ workflow GVCLASS_TAXONOMY {
     // run gvclass on each group of bins (or subsampled bins)
     GVCLASS(ch_gvclass_groups, ch_install_dir)
 
+    // Merge each sample as soon as all its groups complete.
+    ch_gvclass_results = GVCLASS.out.results
+        .combine(ch_gvclass_counts, by: 0)
+        .map { root, result_dir, count ->
+            tuple(groupKey(root, count), result_dir)
+        }
+        .groupTuple()
+        .map { key, result_dirs ->
+            tuple(key.getGroupTarget(), result_dirs)
+        }
     // Collect all GVClass results and merge them into a summary file
-    ch_gvclass_results = GVCLASS.out.results.groupTuple()
     MERGE_GVCLASS(ch_gvclass_results)
 
     // Collect the oversized-bin reports (has list of bins that were subsampled, 
@@ -259,6 +272,5 @@ workflow GVCLASS_TAXONOMY {
     COLLECT_SUBSAMPLE_REPORT(FNA_PREP.out.subsampled.collect())
 
     emit:
-    gvclass_dir = MERGE_GVCLASS.out.gvclass_dir
     summary     = MERGE_GVCLASS.out.summary   // feeds REPORT directly
 }
