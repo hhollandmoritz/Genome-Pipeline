@@ -144,6 +144,8 @@ process FNA_PREP {
 
 /*
 * Run GVClass once on each group of bins or group of subsampled bins.   
+* GVClass output directories are emitted as "results" (merged later 
+* in MERGE_GVCLASS).
 */
 process GVCLASS {
     tag "${root}:${group}"
@@ -155,7 +157,7 @@ process GVCLASS {
     val install_dir
 
     output:
-    tuple val(root), path("gvclass_${group}"), emit: chunk
+    tuple val(root), path("gvclass_${group}"), emit: results
  
     script:
     """
@@ -188,79 +190,48 @@ process COLLECT_SUBSAMPLE_REPORT {
 }
 
 /*
- * Merge all GVClass groups belonging to one sample. Keep per-group native
+ * Merge all GVClass groups belonging to one sample. Keep per-group
  * GVClass outputs, and create a combined TSV with one row per query.
  */
+
 process MERGE_GVCLASS {
     tag "$root"
     label 'small'
     publishDir { "${params.outdir}/${root}_gvclass" }, mode: params.publish_mode
 
     input:
-    tuple val(root), path(chunk_dirs)
+    tuple val(root), path(gvclass_result_dirs, stageAs: 'gvclass_results/*')
 
     output:
-    tuple val(root), path("gvclass_summary.tsv"), emit: summary
-    path "gvclass_out", emit: gvclass_dir
+    tuple val(root), path("gvclass_all_bins_summary.tsv"), emit: summary
+    tuple val(root), path("gvclass_out"), emit: gvclass_dir
 
     script:
     """
     set -euo pipefail
-    shopt -s nullglob
 
-    mkdir -p gvclass_out/groups gvclass_out/split_bins
-    chunks=( gvclass_group_* gvclass_split_* )
-    if (( \${#chunks[@]} == 0 )); then
-        echo "ERROR: No GVClass chunk outputs were staged" >&2
-        exit 1
-    fi
+    mkdir -p gvclass_out
 
-    header_written=false
-    : > all_rows.tsv
 
-    for chunk in "\${chunks[@]}"; do
-        [ -d "\$chunk" ] || continue
-        summary="\$chunk/gvclass_summary.tsv"
-        if [ ! -s "\$summary" ]; then
-            echo "ERROR: Missing or empty GVClass summary: \$summary" >&2
-            exit 1
+    first=true
+    for gvclass_result_dir in gvclass_results/*; do
+        # Append each GVClass summary to the merged summary, keeping the header only once
+        if \$first; then
+            head -n 1 "\$gvclass_result_dir/gvclass_summary.tsv" > gvclass_all_bins_summary.tsv
+            first=false
         fi
 
-        if [ "\$header_written" = false ]; then
-            head -n 1 "\$summary" > gvclass_summary.tsv
-            header_written=true
-        elif ! diff -q <(head -n 1 "\$summary") <(head -n 1 gvclass_summary.tsv) >/dev/null; then
-            echo "ERROR: Inconsistent GVClass summary headers in \$chunk" >&2
-            exit 1
-        fi
-        tail -n +2 "\$summary" >> all_rows.tsv
+        tail -n +2 "\$gvclass_result_dir/gvclass_summary.tsv" >> gvclass_all_bins_summary.tsv
 
-        if [[ "\$chunk" == gvclass_split_* ]]; then
-            original="\${chunk#gvclass_split_}"
-            destination="gvclass_out/split_bins/\$original"
-        else
-            group="\${chunk#gvclass_}"
-            destination="gvclass_out/groups/\$group"
-        fi
-        mkdir -p "\$destination"
-        # Dereference staged links so published output is self-contained.
-        cp -aL "\$chunk" "\$destination/gvclass_out"
+        # Reorganize the GVClass output directories into gvclass_out/<groups>
+        group=\$(basename "\$gvclass_result_dir")
+        group=\${group#gvclass_}
+
+        cp -a "\$gvclass_result_dir" "gvclass_out/\$group"
     done
-
-    if [ "\$header_written" = false ]; then
-        echo "ERROR: No GVClass summaries found" >&2
-        exit 1
-    fi
-
-    LC_ALL=C sort -t \$'\\t' -k1,1 all_rows.tsv >> gvclass_summary.tsv
-    if ! awk -F '\\t' 'NR > 1 && seen[\$1]++ { print "Duplicate GVClass query: " \$1 > "/dev/stderr"; bad=1 } END { exit bad }' gvclass_summary.tsv; then
-        exit 1
-    fi
-    cp gvclass_summary.tsv gvclass_out/gvclass_summary.tsv
-    rm -f all_rows.tsv
-    echo "Merged \${#chunks[@]} GVClass groups for ${root}"
     """
 }
+
 workflow GVCLASS_TAXONOMY {
     take:
     derep_dir   // tuple(root, dir)
