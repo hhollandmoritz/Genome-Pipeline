@@ -57,7 +57,7 @@ process FNA_PREP {
     for bin in "${derep_dir}"/*.fa; do
         size_mb=\$(du -m "\$bin" | cut -f1)
         if [ "\$size_mb" -gt ${params.gvclass_max_bin_size_mb} ]; then
-            gt splitfasta -targetsize ${params.gvclass_max_bin_size_mb}000000 "\$bin"
+            gt splitfasta -targetsize ${params.gvclass_max_bin_size_mb} "\$bin"
             mv "\$bin".* fna_prepped/ 2>/dev/null || true
             n_parts=\$(ls "\$bin".* 2>/dev/null | wc -l)
             echo -e "${root}\\t\$(basename "\$bin")\\t\${size_mb}MB\\t\${n_parts} parts" >> subsampled_bins.tsv
