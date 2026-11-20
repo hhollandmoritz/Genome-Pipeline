@@ -239,10 +239,24 @@ workflow GVCLASS_TAXONOMY {
     main:
     ch_install_dir = Channel.value(file("${params.software_dir}/gvclass", checkIfExists: true).toAbsolutePath().toString())
     FNA_PREP(derep_dir)
-    GVCLASS(FNA_PREP.out.fna_dir, ch_install_dir)
+    // Expand each sample's directory list into separate GVClass jobs.
+    ch_gvclass_groups = FNA_PREP.out.fna_dirs.flatMap { root, dirs ->
+        dirs.collect { dir ->
+            tuple(root, dir.name, dir)
+        }
+    }
+    // run gvclass on each group of bins (or subsampled bins)
+    GVCLASS(ch_gvclass_groups, ch_install_dir)
+
+    // Collect all GVClass results and merge them into a summary file
+    ch_gvclass_results = GVCLASS.out.results.groupTuple()
+    MERGE_GVCLASS(ch_gvclass_results)
+
+    // Collect the oversized-bin reports (has list of bins that were subsampled, 
+    // and the names of the subsamples)
     COLLECT_SUBSAMPLE_REPORT(FNA_PREP.out.subsampled.collect())
 
     emit:
-    gvclass_dir = GVCLASS.out.gvclass_dir
-    summary     = GVCLASS.out.summary   // feeds REPORT directly
+    gvclass_dir = MERGE_GVCLASS.out.gvclass_dir
+    summary     = MERGE_GVCLASS.out.summary   // feeds REPORT directly
 }
