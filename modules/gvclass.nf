@@ -42,7 +42,7 @@ process GVCLASS_SETUP {
 
 process FNA_PREP {
     tag "$root"
-    label 'gvclass'
+    label 'small'
     conda "${projectDir}/envs/genometools.yml"
 
     input:
